@@ -36,10 +36,20 @@ Resume_PDFs_Relatorios/
 
 ## Pré-requisitos
 
-### Python
-```
+### Python (ambiente virtual)
+```bash
+# Criar o venv (apenas na primeira vez)
+python -m venv .venv
+
+# Ativar o venv
+.\.venv\Scripts\activate        # Windows PowerShell
+# source .venv/bin/activate     # Linux/macOS
+
+# Instalar dependências dentro do venv
 pip install -r requirements.txt
 ```
+
+> Sempre ative o venv antes de rodar o script ou os testes.
 
 ### Tesseract OCR (obrigatório para PDFs escaneados)
 Baixar e instalar: https://github.com/UB-Mannheim/tesseract/wiki
