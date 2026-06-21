@@ -61,6 +61,7 @@ def process_folder(working_folder: Path, config, dry_run: bool) -> dict[str, lis
                 ocr_language=config.ocr.language,
                 ocr_dpi=config.ocr.dpi,
                 poppler_path=config.poppler_path,
+                max_pages=config.ocr.max_pages,
                 tesseract_cmd=config.tesseract_cmd,
             )
         except Exception as exc:

@@ -11,6 +11,7 @@ class OcrConfig:
     language: str = "por+eng"
     dpi: int = 300
     min_text_length: int = 50
+    max_pages: int = 10
 
 
 @dataclass
@@ -37,6 +38,7 @@ def load_config(config_path: Optional[str] = None) -> AppConfig:
         language=ocr_data.get("language", "por+eng"),
         dpi=ocr_data.get("dpi", 300),
         min_text_length=ocr_data.get("min_text_length", 50),
+        max_pages=ocr_data.get("max_pages", 10),
     )
 
     return AppConfig(

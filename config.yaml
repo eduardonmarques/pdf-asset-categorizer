@@ -16,6 +16,7 @@ ocr:
   language: "por+eng"          # idiomas para o Tesseract
   dpi: 300                     # resolução para conversão PDF→imagem
   min_text_length: 50          # chars por página abaixo disso aciona OCR
+  max_pages: 10                # máximo de páginas a processar por OCR (evita crash de memória)
 
 # Caminhos de executáveis externos (ajuste se não estiverem no PATH)
 tesseract_cmd: "C:\\Program Files\\Tesseract-OCR\\tesseract.exe"
