@@ -6,7 +6,7 @@ cria subpastas por ativo e atalhos .lnk apontando para cada PDF.
 PDFs processados são renomeados com o sufixo _categorizado.
 
 Uso:
-    python main.py [--config CONFIG] [--dry-run]
+    python main.py [--config CONFIG] [--dry-run] [--sequential]
 """
 
 import argparse
@@ -30,27 +30,28 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Simula sem renomear arquivos nem criar atalhos",
     )
+    parser.add_argument(
+        "--sequential",
+        action="store_true",
+        help="Processa arquivos um a um (sem paralelismo — útil para depuração)",
+    )
     return parser.parse_args()
 
 
-def process_folder(working_folder: Path, config, dry_run: bool) -> dict[str, list[str]]:
-    """Process all PDFs in working_folder root. Returns summary dict."""
+def process_folder_sequential(working_folder: Path, config, dry_run: bool) -> dict[str, list[str]]:
+    """Processamento sequencial — mantido para depuração."""
     summary: dict[str, list[str]] = {
-        "categorized": [],
-        "no_assets": [],
-        "skipped": [],
-        "errors": [],
+        "categorized": [], "no_assets": [], "skipped": [], "errors": [],
     }
 
     pdf_files = list(working_folder.glob("*.pdf"))
     logger.info("Encontrados %d arquivo(s) PDF em '%s'", len(pdf_files), working_folder)
 
     for pdf_path in pdf_files:
-        if is_already_categorized(pdf_path):
-            if config.reprocess_mode == "skip":
-                logger.debug("Ignorando (já categorizado): '%s'", pdf_path.name)
-                summary["skipped"].append(pdf_path.name)
-                continue
+        if is_already_categorized(pdf_path) and config.reprocess_mode == "skip":
+            logger.debug("Ignorando (já categorizado): '%s'", pdf_path.name)
+            summary["skipped"].append(pdf_path.name)
+            continue
 
         logger.info("Processando: '%s'", pdf_path.name)
 
@@ -70,14 +71,12 @@ def process_folder(working_folder: Path, config, dry_run: bool) -> dict[str, lis
             continue
 
         assets = find_assets(text, config.asset_pattern)
-
         if not assets:
             logger.info("Nenhum ativo encontrado em '%s'", pdf_path.name)
             summary["no_assets"].append(pdf_path.name)
             continue
 
         logger.info("Ativos em '%s': %s", pdf_path.name, ", ".join(sorted(assets)))
-
         try:
             organize_pdf(pdf_path, working_folder, assets, dry_run=dry_run)
             summary["categorized"].append(f"{pdf_path.name} → {sorted(assets)}")
@@ -100,17 +99,12 @@ def print_summary(summary: dict[str, list[str]]) -> None:
     if summary["categorized"]:
         print("\nCategorizados:")
         for entry in summary["categorized"]:
-            print(f"  ✓ {entry}")
-
-    if summary["no_assets"]:
-        print("\nSem ativos identificados:")
-        for name in summary["no_assets"]:
-            print(f"  - {name}")
+            print(f"  + {entry}")
 
     if summary["errors"]:
         print("\nErros:")
         for name in summary["errors"]:
-            print(f"  ✗ {name}")
+            print(f"  x {name}")
 
     print("=" * 60)
 
@@ -134,9 +128,25 @@ def main() -> int:
     if args.dry_run:
         logger.info("MODO DRY-RUN — nenhum arquivo será modificado")
 
-    summary = process_folder(working_folder, config, dry_run=args.dry_run)
-    print_summary(summary)
+    if args.sequential:
+        logger.info("Modo sequencial ativado.")
+        summary = process_folder_sequential(working_folder, config, dry_run=args.dry_run)
+    else:
+        from src.parallel_processor import process_folder_parallel
+        logger.info(
+            "Modo paralelo: %d worker(s) digital, %d worker(s) OCR.",
+            config.workers.digital,
+            config.workers.ocr,
+        )
+        summary = process_folder_parallel(
+            working_folder,
+            config,
+            dry_run=args.dry_run,
+            digital_workers=config.workers.digital,
+            ocr_workers=config.workers.ocr,
+        )
 
+    print_summary(summary)
     return 1 if summary["errors"] else 0
 
 

@@ -15,11 +15,18 @@ class OcrConfig:
 
 
 @dataclass
+class WorkersConfig:
+    digital: int = 4
+    ocr: int = 2
+
+
+@dataclass
 class AppConfig:
     working_folder: str = ""
     reprocess_mode: str = "skip"
     asset_pattern: str = r"\b[A-Z]{4}(?:11|3|4)\b"
     ocr: OcrConfig = field(default_factory=OcrConfig)
+    workers: WorkersConfig = field(default_factory=WorkersConfig)
     tesseract_cmd: str = "tesseract"
     poppler_path: Optional[str] = None
     log_level: str = "INFO"
@@ -41,11 +48,18 @@ def load_config(config_path: Optional[str] = None) -> AppConfig:
         max_pages=ocr_data.get("max_pages", 10),
     )
 
+    workers_data = data.get("workers", {})
+    workers = WorkersConfig(
+        digital=workers_data.get("digital", 4),
+        ocr=workers_data.get("ocr", 2),
+    )
+
     return AppConfig(
         working_folder=data.get("working_folder", ""),
         reprocess_mode=data.get("reprocess_mode", "skip"),
         asset_pattern=data.get("asset_pattern", r"\b[A-Z]{4}(?:11|3|4)\b"),
         ocr=ocr,
+        workers=workers,
         tesseract_cmd=data.get("tesseract_cmd", "tesseract"),
         poppler_path=data.get("poppler_path"),
         log_level=data.get("log_level", "INFO"),

@@ -22,6 +22,11 @@ ocr:
 tesseract_cmd: "C:\\Program Files\\Tesseract-OCR\\tesseract.exe"
 poppler_path: "C:\\Users\\dpf\\AppData\\Local\\Microsoft\\WinGet\\Packages\\oschwartz10612.Poppler_Microsoft.Winget.Source_8wekyb3d8bbwe\\poppler-25.07.0\\Library\\bin"
 
+# Paralelismo
+workers:
+  digital: 4   # workers para extração de texto digital (pdfplumber) — Fase 1
+  ocr: 2       # workers para OCR (Tesseract) — Fase 2 (limitado por memória)
+
 # Logging
 log_level: "INFO"              # DEBUG, INFO, WARNING, ERROR
 log_file: "categorizer.log"    # null = somente console
