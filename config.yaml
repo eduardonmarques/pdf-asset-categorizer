@@ -1,0 +1,26 @@
+# Configuração do Categorizador de PDFs de Ativos Financeiros
+
+working_folder: "C:\\Users\\dpf\\Downloads\\Telegram Desktop"
+
+# Comportamento de reprocessamento
+# "skip"    → ignora arquivos já marcados com _categorizado
+# "always"  → reprocessa todos os arquivos a cada execução
+reprocess_mode: "skip"
+
+# Padrão regex para identificar ativos (ações XXXX3/XXXX4 e FIIs XXXX11)
+# Não altere sem necessidade — cobre tickers B3 padrão
+asset_pattern: "\\b[A-Z]{4}(?:11|3|4)\\b"
+
+# Configurações de OCR
+ocr:
+  language: "por+eng"          # idiomas para o Tesseract
+  dpi: 300                     # resolução para conversão PDF→imagem
+  min_text_length: 50          # chars por página abaixo disso aciona OCR
+
+# Caminhos de executáveis externos (ajuste se não estiverem no PATH)
+tesseract_cmd: "tesseract"     # ex: "C:\\Program Files\\Tesseract-OCR\\tesseract.exe"
+poppler_path: null             # ex: "C:\\poppler\\Library\\bin"  (null = usar PATH)
+
+# Logging
+log_level: "INFO"              # DEBUG, INFO, WARNING, ERROR
+log_file: "categorizer.log"    # null = somente console
