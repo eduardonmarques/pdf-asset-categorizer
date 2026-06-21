@@ -1,16 +1,14 @@
 """
-Pipeline de dois estágios com ProcessPoolExecutor:
+Pipeline verdadeiro de dois estágios com dois ProcessPoolExecutor simultâneos.
 
-Fase 1 — Digital (workers rápidos):
-  Tenta extração de texto via pdfplumber em paralelo.
-  PDFs com texto suficiente → asset detection imediata.
-  PDFs escaneados → fila para Fase 2.
+Ambos os pools ficam abertos ao mesmo tempo:
+  - digital_pool (Fase 1): extração pdfplumber em paralelo
+  - ocr_pool     (Fase 2): Tesseract em paralelo
 
-Fase 2 — OCR (workers lentos, limitados por memória):
-  Roda Tesseract em paralelo apenas nos PDFs que precisam.
-
-As funções de worker devem ficar no nível de módulo (requisito do
-multiprocessing "spawn" do Windows com ProcessPoolExecutor).
+À medida que futuros da Fase 1 completam e identificam PDFs escaneados,
+eles são submetidos IMEDIATAMENTE ao ocr_pool — sem esperar o fim da Fase 1.
+Resultado: OCR começa no primeiro arquivo escaneado encontrado, enquanto
+a extração digital ainda está processando os demais.
 """
 
 import logging
@@ -20,23 +18,22 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-# Raiz do projeto — adicionada ao sys.path dos subprocessos (spawn no Windows)
 _PROJECT_ROOT = str(Path(__file__).parent.parent)
 
 
 def _worker_init(project_root: str) -> None:
-    """Inicializador dos subprocessos: garante que o pacote src seja importável."""
+    """Garante que src.* seja importável nos subprocessos (spawn no Windows)."""
     if project_root not in sys.path:
         sys.path.insert(0, project_root)
 
 
 # ---------------------------------------------------------------------------
-# Funções de worker (executadas em subprocessos)
+# Workers (executados em subprocessos)
 # ---------------------------------------------------------------------------
 
 def _digital_worker(args: tuple) -> tuple[str, list[str], bool]:
     """
-    Extrai texto digital de um PDF e detecta ativos.
+    Extrai texto digital e detecta ativos.
     Retorna (path_str, sorted_assets, needs_ocr).
     """
     pdf_path_str, asset_pattern, min_text_length = args
@@ -76,7 +73,7 @@ def _ocr_worker(args: tuple) -> tuple[str, list[str]]:
 
 
 # ---------------------------------------------------------------------------
-# Orquestrador principal
+# Orquestrador
 # ---------------------------------------------------------------------------
 
 def process_folder_parallel(
@@ -89,14 +86,10 @@ def process_folder_parallel(
     from src.file_organizer import is_already_categorized, organize_pdf
 
     summary: dict[str, list[str]] = {
-        "categorized": [],
-        "no_assets": [],
-        "skipped": [],
-        "errors": [],
+        "categorized": [], "no_assets": [], "skipped": [], "errors": [],
     }
 
     all_pdfs = list(working_folder.glob("*.pdf"))
-
     to_process: list[Path] = []
     for p in all_pdfs:
         if is_already_categorized(p) and config.reprocess_mode == "skip":
@@ -107,21 +100,12 @@ def process_folder_parallel(
     total = len(to_process)
     logger.info(
         "Total: %d PDF(s) | ignorados: %d | a processar: %d",
-        len(all_pdfs),
-        len(summary["skipped"]),
-        total,
+        len(all_pdfs), len(summary["skipped"]), total,
     )
-
     if not to_process:
         return summary
 
-    # ------------------------------------------------------------------
-    # Fase 1 — Extração digital em paralelo
-    # ------------------------------------------------------------------
-    logger.info("Fase 1 — Extração digital (%d workers)...", digital_workers)
-
-    ocr_queue: list[Path] = []
-    done = 0
+    _pool_kwargs = dict(initializer=_worker_init, initargs=(_PROJECT_ROOT,))
 
     digital_args = [
         (str(p), config.asset_pattern, config.ocr.min_text_length)
@@ -129,90 +113,81 @@ def process_folder_parallel(
     ]
     path_lookup = {str(p): p for p in to_process}
 
-    with ProcessPoolExecutor(
-        max_workers=digital_workers,
-        initializer=_worker_init,
-        initargs=(_PROJECT_ROOT,),
-    ) as pool:
-        futures = {pool.submit(_digital_worker, arg): arg[0] for arg in digital_args}
-        for future in as_completed(futures):
-            done += 1
-            path_str = futures[future]
+    ocr_arg_template = (
+        None,  # placeholder para path_str
+        config.asset_pattern,
+        config.ocr.dpi,
+        config.ocr.language,
+        config.poppler_path,
+        config.tesseract_cmd,
+        config.ocr.max_pages,
+    )
+
+    # -----------------------------------------------------------------------
+    # Ambos os pools abertos simultaneamente — pipeline verdadeiro
+    # -----------------------------------------------------------------------
+    logger.info(
+        "Iniciando pipeline: %d worker(s) digital + %d worker(s) OCR (simultâneos)",
+        digital_workers, ocr_workers,
+    )
+
+    with ProcessPoolExecutor(max_workers=digital_workers, **_pool_kwargs) as digital_pool, \
+         ProcessPoolExecutor(max_workers=ocr_workers, **_pool_kwargs) as ocr_pool:
+        # Submete toda a Fase 1 de uma vez
+        digital_futures = {
+            digital_pool.submit(_digital_worker, arg): path_lookup[arg[0]]
+            for arg in digital_args
+        }
+
+        ocr_futures: dict = {}
+        phase1_done = 0
+
+        # Coleta resultados da Fase 1; submete ao ocr_pool imediatamente
+        for future in as_completed(digital_futures):
+            phase1_done += 1
+            pdf_path = digital_futures[future]
             try:
                 _, assets, needs_ocr = future.result()
-                pdf_path = path_lookup[path_str]
-
                 if needs_ocr:
-                    ocr_queue.append(pdf_path)
+                    ocr_args = (str(pdf_path),) + ocr_arg_template[1:]
+                    ocr_future = ocr_pool.submit(_ocr_worker, ocr_args)
+                    ocr_futures[ocr_future] = pdf_path
                 elif assets:
                     _finalize(pdf_path, assets, working_folder, dry_run, summary)
                 else:
-                    logger.info("[digital] Sem ativos: '%s'", pdf_path.name)
+                    logger.debug("[digital] Sem ativos: '%s'", pdf_path.name)
                     summary["no_assets"].append(pdf_path.name)
-
             except Exception as exc:
-                logger.error("[digital] Erro em '%s': %s", Path(path_str).name, exc)
-                summary["errors"].append(Path(path_str).name)
+                logger.error("[digital] Erro em '%s': %s", pdf_path.name, exc)
+                summary["errors"].append(pdf_path.name)
 
-            _log_progress("Fase 1", done, total)
+            _log_progress("Fase 1 (digital)", phase1_done, total, step=200)
 
-    logger.info(
-        "Fase 1 concluída — %d digital(is), %d para OCR.",
-        total - len(ocr_queue),
-        len(ocr_queue),
-    )
-
-    # ------------------------------------------------------------------
-    # Fase 2 — OCR em paralelo (apenas PDFs escaneados)
-    # ------------------------------------------------------------------
-    if not ocr_queue:
-        return summary
-
-    logger.info("Fase 2 — OCR (%d workers, %d arquivo(s))...", ocr_workers, len(ocr_queue))
-
-    ocr_total = len(ocr_queue)
-    ocr_done = 0
-
-    ocr_args = [
-        (
-            str(p),
-            config.asset_pattern,
-            config.ocr.dpi,
-            config.ocr.language,
-            config.poppler_path,
-            config.tesseract_cmd,
-            config.ocr.max_pages,
+        ocr_total = len(ocr_futures)
+        logger.info(
+            "Fase 1 concluída. %d digital(is) resolvidos, %d em OCR (já em execução).",
+            total - ocr_total, ocr_total,
         )
-        for p in ocr_queue
-    ]
-    ocr_lookup = {str(p): p for p in ocr_queue}
 
-    with ProcessPoolExecutor(
-        max_workers=ocr_workers,
-        initializer=_worker_init,
-        initargs=(_PROJECT_ROOT,),
-    ) as pool:
-        futures = {pool.submit(_ocr_worker, arg): arg[0] for arg in ocr_args}
-        for future in as_completed(futures):
-            ocr_done += 1
-            path_str = futures[future]
+        # Coleta resultados da Fase 2 (workers já rodando desde o início)
+        phase2_done = 0
+        for future in as_completed(ocr_futures):
+            phase2_done += 1
+            pdf_path = ocr_futures[future]
             try:
                 _, assets = future.result()
-                pdf_path = ocr_lookup[path_str]
-
                 if assets:
                     _finalize(pdf_path, assets, working_folder, dry_run, summary)
                 else:
-                    logger.info("[OCR] Sem ativos: '%s'", pdf_path.name)
+                    logger.debug("[OCR] Sem ativos: '%s'", pdf_path.name)
                     summary["no_assets"].append(pdf_path.name)
-
             except Exception as exc:
-                logger.error("[OCR] Erro em '%s': %s", Path(path_str).name, exc)
-                summary["errors"].append(Path(path_str).name)
+                logger.error("[OCR] Erro em '%s': %s", pdf_path.name, exc)
+                summary["errors"].append(pdf_path.name)
 
-            _log_progress("Fase 2 (OCR)", ocr_done, ocr_total)
+            _log_progress("Fase 2 (OCR)", phase2_done, ocr_total, step=50)
 
-    logger.info("Fase 2 concluída.")
+    logger.info("Pipeline concluído.")
     return summary
 
 
@@ -220,15 +195,8 @@ def process_folder_parallel(
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _finalize(
-    pdf_path: Path,
-    assets: list[str],
-    working_folder: Path,
-    dry_run: bool,
-    summary: dict,
-) -> None:
+def _finalize(pdf_path, assets, working_folder, dry_run, summary):
     from src.file_organizer import organize_pdf
-
     logger.info("Ativos em '%s': %s", pdf_path.name, ", ".join(assets))
     try:
         organize_pdf(pdf_path, working_folder, set(assets), dry_run=dry_run)
@@ -238,7 +206,7 @@ def _finalize(
         summary["errors"].append(pdf_path.name)
 
 
-def _log_progress(phase: str, done: int, total: int) -> None:
-    if total and done % 100 == 0:
+def _log_progress(phase: str, done: int, total: int, step: int = 100) -> None:
+    if total and done % step == 0:
         pct = done / total * 100
         logger.info("%s: %d/%d (%.0f%%)", phase, done, total, pct)
