@@ -9,6 +9,7 @@ Categoriza automaticamente PDFs baixados via Telegram identificando ativos finan
 - Pasta de trabalho configurada em `config.yaml` → campo `working_folder`
 - Processa apenas PDFs na **raiz** da pasta de trabalho (sem recursão)
 - Padrão de ativos: 4 letras maiúsculas + sufixo `3`, `4` ou `11` (ex: `PETR4`, `VALE3`, `MXRF11`)
+- **Tickers encontrados exclusivamente em tabelas são ignorados** — se o ticker aparecer no corpo do texto (mesmo que também esteja em alguma tabela), ele é considerado normalmente; só é descartado quando a única ocorrência é dentro de uma célula de tabela (aplica-se a PDFs digitais; PDFs escaneados via OCR não têm separação estrutural)
 - **Não apaga nenhum arquivo** — apenas cria pastas, atalhos e renomeia PDFs
 - PDF processado → renomeado com `_categorizado` antes da extensão
 - Atalho criado em `<working_folder>/<TICKER>/<nome_original> - <TICKER>.lnk`
@@ -90,8 +91,8 @@ PDF encontrado
     │       ├─ sim + reprocess_mode=skip → IGNORAR
     │       └─ não (ou reprocess_mode=always) ↓
     │
-    ├─ extrair texto (pdfplumber)
-    │       └─ texto < min_text_length → OCR (pdf2image + Tesseract)
+    ├─ extrair texto (pdfplumber — tabelas excluídas)
+    │       └─ texto < min_text_length → OCR (pdf2image + Tesseract, sem exclusão de tabelas)
     │
     ├─ aplicar regex → set de tickers
     │       └─ vazio → registrar "sem ativos"
@@ -107,5 +108,7 @@ PDF encontrado
 
 - `win32com.client` só funciona em Windows — testes que envolvem criação de atalhos devem usar mock
 - O OCR requer Tesseract + Poppler instalados na máquina; sem eles, PDFs escaneados ficam sem texto
+- Exclusão de tabelas usa `pdfplumber.page.find_tables()` + `page.filter(_build_table_filter(...))` — testável via `_build_table_filter` diretamente (ver `tests/test_pdf_processor.py`)
+- Para PDFs escaneados (caminho OCR), a exclusão de tabelas **não é aplicada** — não há informação estrutural na imagem
 - Falsos positivos conhecidos estão em `src/asset_detector.py::_FALSE_POSITIVES`
 - `config.local.yaml` está no `.gitignore` — use-o para sobrescrever `config.yaml` sem commitar caminhos locais
