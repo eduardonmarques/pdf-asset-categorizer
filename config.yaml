@@ -18,8 +18,8 @@ ocr:
   min_text_length: 50          # chars por página abaixo disso aciona OCR
 
 # Caminhos de executáveis externos (ajuste se não estiverem no PATH)
-tesseract_cmd: "tesseract"     # ex: "C:\\Program Files\\Tesseract-OCR\\tesseract.exe"
-poppler_path: null             # ex: "C:\\poppler\\Library\\bin"  (null = usar PATH)
+tesseract_cmd: "C:\\Program Files\\Tesseract-OCR\\tesseract.exe"
+poppler_path: "C:\\Users\\dpf\\AppData\\Local\\Microsoft\\WinGet\\Packages\\oschwartz10612.Poppler_Microsoft.Winget.Source_8wekyb3d8bbwe\\poppler-25.07.0\\Library\\bin"
 
 # Logging
 log_level: "INFO"              # DEBUG, INFO, WARNING, ERROR
