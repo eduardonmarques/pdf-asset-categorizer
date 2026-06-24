@@ -114,6 +114,46 @@ PDF encontrado
             └─ criar atalho <nome_original> - <TICKER>.lnk
 ```
 
+## Ambiente Python e Subprocessos — regra obrigatória
+
+Este projeto usa `.venv` como ambiente virtual. Nunca invoque `python` ou `python.exe`
+como string literal em subprocessos:
+
+```python
+# ERRADO — usa o Python do PATH do sistema (Anaconda), ignorando o .venv
+subprocess.run(["python", "main.py"])
+os.system("python main.py")
+```
+
+O Windows resolve `"python"` pelo PATH global, que aponta para o Anaconda instalado em
+`C:\Users\dpf\anaconda3\python.exe`. Isso faz o subprocesso rodar fora do `.venv`,
+sem acesso às dependências instaladas (pdfplumber, pytesseract, pdf2image, etc.),
+causando `ModuleNotFoundError` ou comportamento inconsistente com o processo pai.
+
+Esse problema foi identificado em produção: o processo pai (PID 19672) iniciava
+corretamente pelo `.venv`, mas seus processos filhos e workers de multiprocessing
+(PIDs 7072, 21496, 23616, 19532, 7640, 22864, 21412) rodavam com `anaconda3`.
+
+**Correção obrigatória — use sempre `sys.executable`:**
+
+```python
+import sys, subprocess
+
+# CORRETO — herda o mesmo interpretador do processo pai (.venv)
+subprocess.run([sys.executable, "main.py"])
+subprocess.Popen([sys.executable, "-m", "modulo"])
+
+# Para multiprocessing, o spawn já herda sys.executable automaticamente
+# desde que o bloco abaixo esteja presente em main.py:
+if __name__ == "__main__":
+    multiprocessing.freeze_support()
+    ...
+```
+
+`sys.executable` retorna o caminho absoluto do interpretador atual
+(ex: `G:\Meu Drive\Git\Projetos\Resume_PDFs_Relatorios\.venv\Scripts\python.exe`),
+garantindo que todos os subprocessos e workers usem o mesmo `.venv`.
+
 ## Observações para Agentes
 
 - `win32com.client` só funciona em Windows — testes que envolvem criação de atalhos devem usar mock
