@@ -81,3 +81,8 @@ def setup_logging(config: AppConfig) -> None:
         datefmt="%Y-%m-%d %H:%M:%S",
         handlers=handlers,
     )
+
+    # Silencia avisos verbosos do pdfminer ("Cannot set gray non-stroke color...",
+    # cores/fontes inválidas em PDFs malformados) — inofensivos e poluem o log.
+    for noisy in ("pdfminer", "pdfplumber"):
+        logging.getLogger(noisy).setLevel(logging.ERROR)

@@ -1,4 +1,5 @@
 import logging
+import warnings
 from pathlib import Path
 from typing import Optional
 
@@ -8,6 +9,10 @@ from pdf2image import convert_from_path
 from PIL import Image
 
 logger = logging.getLogger(__name__)
+
+# OCR renderiza páginas grandes a 300 DPI; o PIL alerta sobre imagens muito
+# grandes (DecompressionBombWarning). São PDFs legítimos, não ataque — silencia.
+warnings.filterwarnings("ignore", category=Image.DecompressionBombWarning)
 
 
 def _build_table_filter(table_bboxes: list[tuple]):

@@ -25,6 +25,10 @@ def _worker_init(project_root: str) -> None:
     """Garante que src.* seja importável nos subprocessos (spawn no Windows)."""
     if project_root not in sys.path:
         sys.path.insert(0, project_root)
+    # Workers não passam por setup_logging; silencia aqui o ruído do pdfminer
+    # ("Cannot set gray non-stroke color...") emitido durante a extração.
+    for noisy in ("pdfminer", "pdfplumber"):
+        logging.getLogger(noisy).setLevel(logging.ERROR)
 
 
 # ---------------------------------------------------------------------------
@@ -161,7 +165,12 @@ def process_folder_parallel(
                 logger.error("[digital] Erro em '%s': %s", pdf_path.name, exc)
                 summary["errors"].append(pdf_path.name)
 
-            _log_progress("Fase 1 (digital)", phase1_done, total, step=200)
+            if phase1_done % 200 == 0 or phase1_done == total:
+                pct = phase1_done / total * 100
+                logger.info(
+                    "Fase 1 (digital): %d/%d (%.0f%%) | OCR enfileirado: %d",
+                    phase1_done, total, pct, len(ocr_futures),
+                )
 
         ocr_total = len(ocr_futures)
         logger.info(
